@@ -1,4 +1,4 @@
-# Linux学习(以升级Ubuntu系统为例，从20升级到22)
+# Linux学习(以升级Ubuntu系统为例，从22升级到24)
 
 ## 购买配置阿里云服务器
 配置
@@ -6,7 +6,7 @@ Ubuntu 22.04 64位
 2 核（vCPU）
 2 GiB
 
-## 对Ubuntu22升级
+## 对Ubuntu24升级
 
 ### 看目前系统状态
 
@@ -33,7 +33,7 @@ Filesystem      Size  Used Avail Use% Mounted on
 ### 查看并备份软件源
 
 ```
-cat /etc/apt/sources.list   // 查看阿里云配值的什么源
+cat /etc/apt/sources.list   // 查看阿里云配置的是什么源
 
 ## Note, this file is written by cloud-init on first boot of an instance
 ## modifications made here will not survive a re-bundle.
@@ -88,11 +88,11 @@ deb http://mirrors.cloud.aliyuncs.com/ubuntu jammy-security multiverse
 
 // 类似mirrors的地址是阿里云预置的镜像源
 
-sudo cp /etc/apt/source.list /etc/apt/source.list.bak   // 做好备份
+sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak   // 做好备份
 
 ```
 
-### 把20.04更新到最新状态
+### 把22.04更新到最新状态
 
 ```
 // 养成好习惯，做任何处理前先升级包
@@ -147,7 +147,7 @@ sudo apt-mark unhold cloud-init intel-microcode
 sudo apt upgrade -y
 // 查找一下还有没有别的包被锁定了，再看看需不需要重启
 apt-mark showhold
-ls /var/run/reboot-requierd
+ls /var/run/reboot-required
 
 // 没有，问题解决，开始升级
 sudo do-release-upgrade
@@ -186,7 +186,7 @@ If you select 'No' the upgrade will cancel.
 Continue [yN] n     // 发现官方想把我直接推送到24.04版本，取消升级，noble是24.04的代号，jammy是22.04的代号
 
 // 回退，查看版本是否是22.04
-lsb-release -a
+lsb_release -a
 LSB Version:    core-11.1.0ubuntu4-noarch:security-11.1.0ubuntu4-noarch
 Distributor ID: Ubuntu
 Description:    Ubuntu 22.04.5 LTS
@@ -205,7 +205,7 @@ cat /etc/apt/sources.list                                  // 检查替换结果
 
 ### 拉取新版本软件索引
 ```
-sudo apt upgrade        // 从阿里云源拉取数据
+sudo apt update        // 从阿里云源拉取数据
 
 sudo apt upgrade --without-new-pkgs -y     // 不引入新包，先把已有的包换到noble版本
 
@@ -229,3 +229,54 @@ uname -r
 
 sudo dpkg -C        // 审计包状态：无输出 = 没有一个包处于损坏/半配置状态
 ```
+
+### 内核没有升级成功（裸内核问题）
+
+```
+// 升级完成后发现内核还是旧版本
+uname -r
+5.15.0-186-generic
+
+ls /boot/vmlinuz-*
+/boot/vmlinuz-5.15.0-186-generic    // 只有旧内核，6.8 根本没装上
+
+// 查看内核包家族
+dpkg -l | grep -E 'linux-(image|headers|generic|virtual|modules)'
+// 结果只有 linux-image-5.15.0-186-generic 等裸内核包，
+// 没有 linux-generic 之类的元包
+
+// 诊断结论：云镜像装的是"裸内核"，没有元包
+// 元包（metapackage）本身不含内核文件，只是"指向最新内核"的空壳
+// apt 眼里系统是完整的：旧内核没有更新可用，新内核没人点名要装
+// 所以 full-upgrade 不会自动装 6.8 新内核
+
+sudo apt install linux-generic -y    // 药方：手动补装元包，自动拉齐 6.8 内核+模块+头文件
+ls /boot/vmlinuz-*                   // 现在能看到 5.15 和 6.8 两个内核
+sudo reboot                          // 内核切换必须重启——运行中的内核是开机那一刻加载进内存的
+
+uname -r
+6.8.0-XX-generic                     // 重启后新内核生效 ✔
+```
+
+### 升级过程中的坑（复盘记录）
+
+1. **grub-pc 对话框**：升级引导程序 GRUB 时弹出全屏菜单（键盘操作：方向键移动、空格勾选、Tab 切到 Ok、回车）。必须选**整块磁盘 /dev/vda**，不能选分区 /dev/vda3——分区引导用 blocklist 机制，不可靠。
+2. **needrestart 与 aegis 崩溃**：装完包后 needrestart 检查哪些服务还在用旧库并自动重启。其中 `aegis.service` 启动失败——aegis 是阿里云云盾的安全代理（第三方商业软件），跨版本升级后旧二进制与新系统库不兼容而崩溃。**不影响系统本身**，遗留待处理。
+3. **幽灵文件**：/etc/apt/ 下出现 `sources.list.curtin.orig`（云镜像安装工具 curtin 留的出厂原文件）和 `sources.list.distUpgrade`（被中止的 do-release-upgrade 留的备份）。apt 只读 `sources.list` 和 `sources.list.d/` 下 `.list` 结尾的文件，其他后缀一律无视。**千万别把它们改名成 .list 结尾**，否则旧源会被重新读进来。
+4. **"版本号新 ≠ 升级完成"**：lsb_release 显示 24.04 时内核可能还是旧的。`apt list --upgradable` 有盲区——只列"已装包有新版本"，看不见"该新装还没装"的包（新内核属于后者：5.15 和 6.8 是不同包名）。
+5. **do-release-upgrade 不认阿里云镜像**：官方工具识别不了 mirrors.cloud.aliyuncs.com 的源格式，提示 "No valid mirror found"。手动方案（sed 改源）完美绕开，且全程走阿里云镜像，下载快。
+
+### 本次学到的核心概念
+
+| 概念 | 一句话解释 |
+|---|---|
+| apt update / upgrade / full-upgrade / autoremove | 刷新软件列表 / 升级已装包 / 允许增删包的彻底升级 / 清理无用包 |
+| apt-mark hold / unhold | 锁定 / 解锁包版本，防止被升级 |
+| 软件源 sources.list | apt 的"货架清单"；换版本 = 换代号（jammy → noble） |
+| 元包 metapackage | 不含实际文件的"指向最新版本"的空壳，如 linux-generic |
+| 内核切换必须重启 | 运行中的内核是开机那一刻加载进内存的 |
+| 快照 | 变更前的兜底，失败可一键回滚 |
+| tmux | 终端复用器，SSH 断线不中断正在跑的任务 |
+| needrestart | 升级后检查哪些服务需要重启的小管家 |
+| GRUB | 引导程序，开机时负责加载内核 |
+| 第三方软件兼容性 | 云盾 aegis 这类贴底层的软件，系统大版本升级时最容易崩 |
