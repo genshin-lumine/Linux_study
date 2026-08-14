@@ -261,8 +261,8 @@ uname -r
 ### 升级过程中的坑（复盘记录）
 
 1. **grub-pc 对话框**：升级引导程序 GRUB 时弹出全屏菜单（键盘操作：方向键移动、空格勾选、Tab 切到 Ok、回车）。必须选**整块磁盘 /dev/vda**，不能选分区 /dev/vda3——分区引导用 blocklist 机制，不可靠。
-2. **needrestart 与 aegis 崩溃**：装完包后 needrestart 检查哪些服务还在用旧库并自动重启。其中 `aegis.service` 启动失败——aegis 是阿里云云盾的安全代理（第三方商业软件），跨版本升级后旧二进制与新系统库不兼容而崩溃。**不影响系统本身**，遗留待处理。
-3. **幽灵文件**：/etc/apt/ 下出现 `sources.list.curtin.orig`（云镜像安装工具 curtin 留的出厂原文件）和 `sources.list.distUpgrade`（被中止的 do-release-upgrade 留的备份）。apt 只读 `sources.list` 和 `sources.list.d/` 下 `.list` 结尾的文件，其他后缀一律无视。**千万别把它们改名成 .list 结尾**，否则旧源会被重新读进来。
+2. **needrestart 与 aegis 崩溃**：2026-08-14 勘察：aegis 自更新组件已拉到兼容 24.04 的新版本，服务自愈，systemctl --failed 零失败，无需处置
+3. **幽灵文件**：/etc/apt/ 下出现 `sources.list.curtin.orig`（云镜像安装工具 curtin 留的出厂原文件）和 `sources.list.distUpgrade`（被中止的 do-release-upgrade 留的备份）。apt 只读 `sources.list` 和 `sources.list.d/` 下 `.list` 结尾的文件，其他后缀一律无视。**千万别把它们改名成 .list 结尾**，否则旧源会被重新读进来。已于 08-14 连同意外发现的 preferences.d.save 一起 mv 归档至 /root/apt-backup/
 4. **"版本号新 ≠ 升级完成"**：lsb_release 显示 24.04 时内核可能还是旧的。`apt list --upgradable` 有盲区——只列"已装包有新版本"，看不见"该新装还没装"的包（新内核属于后者：5.15 和 6.8 是不同包名）。
 5. **do-release-upgrade 不认阿里云镜像**：官方工具识别不了 mirrors.cloud.aliyuncs.com 的源格式，提示 "No valid mirror found"。手动方案（sed 改源）完美绕开，且全程走阿里云镜像，下载快。
 
